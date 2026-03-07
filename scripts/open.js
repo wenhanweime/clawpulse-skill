@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const DEFAULT_URL = 'http://127.0.0.1:18790/';
-const DEFAULT_PROXY_SCRIPT = path.join(os.homedir(), '.openclaw', 'monitors', 'gateway-proxy-enhanced.js');
+const DEFAULT_PROXY_SCRIPT = path.join(__dirname, '..', 'monitors', 'clawpulse-proxy.js');
 
 const url = process.env.CLAWPULSE_URL || DEFAULT_URL;
 const proxyScript = process.env.CLAWPULSE_PROXY_SCRIPT || DEFAULT_PROXY_SCRIPT;
@@ -47,8 +47,8 @@ function openBrowser(u) {
 }
 
 function restartProxy() {
-  // Best-effort restart: start a new proxy instance; assumes old one is dead.
-  // If an old instance is still holding the port, it will fail and user can handle it.
+  // Best-effort start: launch the proxy in the background.
+  // If the port is already in use, this will fail silently.
   const child = spawn(process.execPath, [proxyScript], {
     stdio: 'ignore',
     detached: true,

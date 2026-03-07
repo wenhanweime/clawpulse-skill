@@ -5,13 +5,14 @@ Open the **ClawPulse** local monitoring dashboard in the default browser.
 ## What it does
 
 - Opens the dashboard URL (default: `http://127.0.0.1:18790/`).
-- If the dashboard is not reachable, it tries to start the local proxy script:
-  - `~/.openclaw/monitors/gateway-proxy-enhanced.js`
+- If the dashboard is not reachable, it tries to start the bundled proxy script:
+  - `monitors/clawpulse-proxy.js`
 
 ## Requirements
 
 - macOS (uses the `open` command)
-- A running ClawPulse proxy on port **18790** (or let the skill try to start it)
+- A running OpenClaw Gateway on **127.0.0.1:18789**
+- The ClawPulse proxy listens on **127.0.0.1:18790** (the skill can try to start it)
 
 ## Usage
 

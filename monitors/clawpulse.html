@@ -1,0 +1,1878 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CLAWPULSE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00ff9f;
+            --primary-dim: rgba(0, 255, 159, 0.1);
+            --primary-glow: rgba(0, 255, 159, 0.3);
+            --secondary: #00d4ff;
+            --warning: #ffb700;
+            --danger: #ff3366;
+            --bg-dark: #0a0e1a;
+            --bg-panel: rgba(15, 20, 35, 0.85);
+            --bg-elevated: rgba(20, 28, 45, 0.95);
+            --border: rgba(0, 255, 159, 0.15);
+            --border-strong: rgba(0, 255, 159, 0.3);
+            --text: #e0e6ed;
+            --text-dim: #8b95a8;
+            --text-bright: #ffffff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+            background: var(--bg-dark);
+            color: var(--text);
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* 扫描线背景效果 */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 255, 159, 0.03) 0px,
+                transparent 1px,
+                transparent 2px,
+                rgba(0, 255, 159, 0.03) 3px
+            );
+            pointer-events: none;
+            z-index: 1;
+            animation: scanline 8s linear infinite;
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(4px); }
+        }
+
+        /* 网格背景 */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image:
+                linear-gradient(rgba(0, 255, 159, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 159, 0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* 顶部状态栏 */
+        .status-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 48px;
+            background: var(--bg-elevated);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(20px);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            z-index: 100;
+            box-shadow: 0 2px 20px rgba(0, 255, 159, 0.1);
+        }
+
+        .title {
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--primary);
+            text-shadow: 0 0 10px var(--primary-glow);
+        }
+
+        .title::before {
+            content: '▸';
+            margin-right: 8px;
+            animation: blink 2s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50%, 100% { opacity: 1; }
+            25%, 75% { opacity: 0.3; }
+        }
+
+        .status-indicators {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .indicator-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.7; }
+        }
+
+        .indicator-dot.danger {
+            background: var(--danger);
+            box-shadow: 0 0 8px var(--danger);
+        }
+
+        /* 主容器 - 三栏布局 */
+        .main-container {
+            position: fixed;
+            top: 48px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: grid;
+            grid-template-columns: 260px 1fr 400px;
+            gap: 1px;
+            background: var(--border);
+            z-index: 2;
+        }
+
+        /* 左侧面板 */
+        .left-panel {
+            background: var(--bg-panel);
+            backdrop-filter: blur(20px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 3;
+        }
+
+        /* 中央画布 */
+        .center-canvas {
+            background: var(--bg-dark);
+            position: relative;
+            overflow: visible;
+            z-index: 1;
+        }
+
+        /* 右侧面板 - 加宽 */
+        .right-panel {
+            background: var(--bg-panel);
+            backdrop-filter: blur(20px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 3;
+        }
+
+        /* 面板标题 */
+        .panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-elevated);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+        }
+
+        .panel-title::before {
+            content: '◆';
+            font-size: 6px;
+            margin-right: 8px;
+            color: var(--primary);
+        }
+
+        .panel-badge {
+            font-size: 9px;
+            padding: 2px 8px;
+            background: var(--primary-dim);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .clear-button {
+            padding: 4px 12px;
+            background: rgba(255, 51, 102, 0.1);
+            border: 1px solid rgba(255, 51, 102, 0.3);
+            color: var(--danger);
+            font-size: 9px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'IBM Plex Mono', monospace;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .clear-button:hover {
+            background: rgba(255, 51, 102, 0.2);
+            border-color: var(--danger);
+        }
+
+        /* 面板内容 */
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        /* 统计项 */
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .stat-item:last-child {
+            border-bottom: none;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--primary);
+            text-shadow: 0 0 10px var(--primary-glow);
+        }
+
+        /* 详情项目 - 紧凑样式 */
+        .detail-item {
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: rgba(0, 255, 159, 0.03);
+            border-left: 3px solid var(--primary);
+            border-radius: 2px;
+            font-size: 10px;
+            line-height: 1.5;
+            animation: slideIn 0.3s ease-out;
+            transition: all 0.2s;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .detail-item:hover {
+            background: rgba(0, 255, 159, 0.08);
+            border-left-color: var(--primary);
+        }
+
+        .detail-item.tool-call {
+            border-left-color: var(--secondary);
+            background: rgba(0, 212, 255, 0.03);
+        }
+
+        .detail-item.tool-call:hover {
+            background: rgba(0, 212, 255, 0.08);
+        }
+
+        .detail-item.assistant-response {
+            border-left-color: var(--primary);
+        }
+
+        .detail-item.error {
+            border-left-color: var(--danger);
+            background: rgba(255, 51, 102, 0.05);
+        }
+
+        .detail-item.error:hover {
+            background: rgba(255, 51, 102, 0.1);
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .detail-time {
+            color: var(--text-dim);
+            font-size: 9px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .detail-type {
+            display: inline-block;
+            padding: 2px 6px;
+            background: var(--primary-dim);
+            color: var(--primary);
+            border-radius: 2px;
+            font-size: 8px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .detail-type.tool {
+            background: rgba(0, 212, 255, 0.1);
+            color: var(--secondary);
+        }
+
+        .detail-type.error {
+            background: rgba(255, 51, 102, 0.1);
+            color: var(--danger);
+        }
+
+        .detail-type.lifecycle {
+            background: rgba(255, 183, 0, 0.1);
+            color: var(--warning);
+        }
+
+        .detail-title {
+            color: var(--text);
+            font-size: 10px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .detail-content {
+            color: var(--text-dim);
+            font-size: 9px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 150px;
+            overflow-y: auto;
+            line-height: 1.4;
+        }
+
+        .detail-content::-webkit-scrollbar {
+            width: 3px;
+        }
+
+        .detail-content::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .detail-content::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px;
+        }
+
+        .detail-result {
+            margin-top: 6px;
+            padding: 6px 8px;
+            background: rgba(0, 255, 159, 0.04);
+            border: 1px solid rgba(0, 255, 159, 0.1);
+            border-radius: 3px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .detail-result-label {
+            font-size: 8px;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 3px;
+            font-weight: 600;
+        }
+
+        .detail-result-content {
+            font-size: 9px;
+            color: var(--text);
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.4;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .detail-result::-webkit-scrollbar {
+            width: 3px;
+        }
+
+        .detail-result::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px;
+        }
+
+        .detail-item.error .detail-result {
+            background: rgba(255, 51, 102, 0.04);
+            border-color: rgba(255, 51, 102, 0.15);
+        }
+
+        .detail-item.error .detail-result-label {
+            color: var(--danger);
+        }
+
+        .detail-meta {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 9px;
+            color: var(--text-dim);
+        }
+
+        .detail-meta-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 3px;
+        }
+
+        .detail-meta-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-meta-label {
+            font-weight: 600;
+            min-width: 50px;
+        }
+
+        .detail-meta-value {
+            flex: 1;
+            word-break: break-all;
+        }
+
+        /* Agent 核心可视化 */
+        .agent-core {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 120px;
+            height: 120px;
+            z-index: 15;
+        }
+
+        .core-circle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(176, 184, 200, 0.4);
+            border-radius: 50%;
+            background: rgba(26, 31, 46, 0.5);
+            transition: all 0.5s;
+        }
+
+        .core-label {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #b0b8c8;
+            transition: all 0.5s;
+        }
+
+        .agent-core.active .core-circle {
+            border: 3px solid var(--primary);
+            border-top-color: transparent;
+            background: rgba(0, 255, 159, 0.08);
+            box-shadow: 0 0 30px var(--primary-glow), inset 0 0 20px var(--primary-glow);
+            animation: spin-core 1.5s linear infinite;
+        }
+
+        .agent-core.active .core-label {
+            color: var(--primary);
+            text-shadow: 0 0 15px var(--primary-glow);
+        }
+
+        @keyframes spin-core {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        /* 工具节点 */
+        .tool-nodes {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+        }
+
+        .tool-node {
+            position: absolute;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            z-index: 10;
+            /* translate set by JS to center the dot (not the whole node) */
+        }
+
+        .tool-dot {
+            width: 14px;
+            height: 14px;
+            background: #252a3a;
+            border: 1.5px solid rgba(176, 184, 200, 0.4);
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .tool-count {
+            position: absolute;
+            top: -8px;
+            right: -10px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            background: var(--primary);
+            color: var(--bg-dark);
+            font-size: 9px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            border-radius: 8px;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 8px var(--primary-glow);
+            z-index: 5;
+        }
+
+        .tool-count.visible {
+            display: flex;
+        }
+
+        .tool-label {
+            font-size: 11px;
+            color: #b0b8c8;
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            opacity: 0.6;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .tool-node.active .tool-dot {
+            background: var(--primary);
+            border-color: var(--primary);
+            box-shadow: 0 0 12px var(--primary), 0 0 24px var(--primary-glow);
+        }
+
+        .tool-node.active .tool-label {
+            color: var(--primary);
+            opacity: 1;
+            font-weight: 600;
+        }
+
+        /* 连接线 - top/left 指向核心边缘点坐标
+           transform-origin: 0 0 让旋转以左上角为圆心
+           每次改 height 时同步 updateLineTransform() 补偿 translateY */
+        .connection-line {
+            position: absolute;
+            height: 1px;
+            background: rgba(176, 184, 200, 0.2);
+            opacity: 1;
+            transition: height 0.3s ease, background 0.3s, box-shadow 0.3s;
+            z-index: 1;
+            transform-origin: 0 0;
+        }
+
+        .connection-line.active {
+            background: var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+            animation: flow-pulse 1s ease-in-out infinite;
+        }
+
+        .connection-line.used {
+            background: rgba(0, 255, 159, 0.2);
+        }
+
+        @keyframes flow-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        /* 滚动条样式 */
+        .panel-content::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .panel-content::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .panel-content::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 2px;
+        }
+
+        .panel-content::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+        }
+
+        /* 空状态 */
+        .empty-state {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--text-dim);
+            font-size: 10px;
+        }
+
+        /* Session 选择器 */
+        .session-selector {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-elevated);
+        }
+
+        .session-selector-label {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+        }
+
+        .session-live-badge {
+            display: inline-block;
+            padding: 1px 6px;
+            background: var(--primary);
+            color: var(--bg-dark);
+            font-size: 8px;
+            font-weight: 700;
+            border-radius: 2px;
+            margin-left: 6px;
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+
+        .session-selector select {
+            width: 100%;
+            padding: 6px 8px;
+            background: var(--bg-dark);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        .session-selector select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 6px var(--primary-glow);
+        }
+
+        .session-selector select option {
+            background: var(--bg-dark);
+            color: var(--text);
+        }
+
+        /* 结果分布条 */
+        .result-bar-container {
+            margin-top: 8px;
+            padding: 10px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .result-bar-label {
+            font-size: 10px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+
+        .result-bar {
+            display: flex;
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .result-bar-segment {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+
+        .result-bar-segment.success {
+            background: var(--primary);
+        }
+
+        .result-bar-segment.no-output {
+            background: var(--warning);
+        }
+
+        .result-bar-segment.error {
+            background: var(--danger);
+        }
+
+        .result-bar-legend {
+            display: flex;
+            gap: 12px;
+            margin-top: 6px;
+            font-size: 9px;
+        }
+
+        .result-bar-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-dim);
+        }
+
+        .result-bar-legend-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 1px;
+        }
+
+        .result-bar-legend-dot.success { background: var(--primary); }
+        .result-bar-legend-dot.no-output { background: var(--warning); }
+        .result-bar-legend-dot.error { background: var(--danger); }
+
+        /* 响应式 */
+        @media (max-width: 1400px) {
+            .main-container {
+                grid-template-columns: 240px 1fr 380px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 顶部状态栏 -->
+    <div class="status-bar">
+        <div class="title">CLAWPULSE</div>
+        <div class="status-indicators">
+            <div class="indicator">
+                <div class="indicator-dot" id="connectionDot"></div>
+                <span id="connectionStatus">CONNECTED</span>
+            </div>
+            <div class="indicator">
+                <div class="indicator-dot" id="agentDot"></div>
+                <span id="agentStatus">IDLE</span>
+            </div>
+            <div class="indicator">
+                <div class="indicator-dot" id="workerDot"></div>
+                <span id="workerStatus">OK</span>
+            </div>
+            <div class="indicator">
+                <span id="clockTime">00:00:00</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 左侧面板：统计 -->
+        <div class="left-panel">
+            <div class="session-selector">
+                <div class="session-selector-label">Session <span class="session-live-badge" id="liveBadge">LIVE</span></div>
+                <select id="sessionSelect">
+                    <option value="live">📡 Current Session (Live)</option>
+                </select>
+            </div>
+            <div class="panel-header">
+                <div class="panel-title">System Metrics</div>
+                <span class="panel-badge" id="uptimeBadge">00:00</span>
+            </div>
+            <div class="panel-content" id="statsContent">
+                <div class="stat-item">
+                    <div class="stat-label">Total Runs</div>
+                    <div class="stat-value" id="statRuns">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Tool Calls</div>
+                    <div class="stat-value" id="statTools">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Duration</div>
+                    <div class="stat-value" id="statDuration">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Sessions</div>
+                    <div class="stat-value" id="statSessions">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Events</div>
+                    <div class="stat-value" id="statEvents">0</div>
+                </div>
+
+                <div class="result-bar-container" id="resultBarContainer" style="display: none;">
+                    <div class="result-bar-label">Tool Results</div>
+                    <div class="result-bar">
+                        <div class="result-bar-segment success" id="barSuccess" style="width: 0%"></div>
+                        <div class="result-bar-segment no-output" id="barNoOutput" style="width: 0%"></div>
+                        <div class="result-bar-segment error" id="barError" style="width: 0%"></div>
+                    </div>
+                    <div class="result-bar-legend">
+                        <div class="result-bar-legend-item">
+                            <div class="result-bar-legend-dot success"></div>
+                            <span id="legendSuccess">0</span>
+                        </div>
+                        <div class="result-bar-legend-item">
+                            <div class="result-bar-legend-dot no-output"></div>
+                            <span id="legendNoOutput">0</span>
+                        </div>
+                        <div class="result-bar-legend-item">
+                            <div class="result-bar-legend-dot error"></div>
+                            <span id="legendError">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 中央画布 -->
+        <div class="center-canvas" id="canvas">
+            <div class="agent-core" id="agentCore">
+                <div class="core-circle"></div>
+                <div class="core-label">AGENT</div>
+            </div>
+            <div class="tool-nodes" id="toolNodes"></div>
+        </div>
+
+        <!-- 右侧面板：详情 -->
+        <div class="right-panel">
+            <div class="panel-header">
+                <div class="panel-title">Execution Details</div>
+                <div>
+                    <span class="panel-badge" id="detailCount">0</span>
+                    <button class="clear-button" onclick="clearDetails()">Clear</button>
+                </div>
+            </div>
+            <div class="panel-content" id="detailsContent">
+                <div class="empty-state">Waiting for execution details...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 配置 ====================
+        // Primary tools (inner ring, larger)
+        const primaryTools = [
+            'browser', 'exec', 'read', 'edit',
+            'write', 'web_fetch', 'process', 'web_search'
+        ];
+        // Secondary tools (outer ring, smaller)
+        const secondaryTools = [
+            'session_status', 'memory_search', 'memory_get',
+            'gateway', 'sessions_spawn', 'cron', 'canvas',
+            'sessions_list', 'sessions_history', 'sessions_send',
+            'message', 'nodes', 'subagents', 'tts', 'agents_list'
+        ];
+        const tools = [...primaryTools, ...secondaryTools];
+
+        // ==================== 状态 ====================
+        let stats = {
+            runs: 0,
+            tools: 0,
+            events: 0,
+            sessions: 0
+        };
+
+        let details = [];
+        const maxDetails = 100;
+        let currentAssistantItem = null; // 追踪当前的 assistant 回复
+        let toolCallCounts = {};
+        let resultCounts = { success: 0, no_output: 0, error: 0 };
+        let sessions = new Map();
+        let currentSessionMode = 'live'; // 'live' 或 session id
+
+        let currentState = {
+            status: 'idle',
+            startTime: null
+        };
+
+        // Worker health (agent + tools activity)
+        const WORKER_STALL_MS = 45000; // 45s: no agent/tool event -> mark stalled
+        let lastWorkerActivityAt = Date.now();
+        let stallTimer = null;
+
+        let idleTimer = null; // 无活动超时，自动回 idle
+
+        // ==================== 初始化 ====================
+        function init() {
+            initToolNodes();
+            initClock();
+            setWorkerStatus('DEGRADED');
+            touchWorkerActivity('init');
+            connect();
+            startAnimationLoop();
+            loadSessionList();
+            initSessionSelector();
+            loadCurrentSessionBaseline();
+        }
+
+        function initToolNodes() {
+            const container = document.getElementById('toolNodes');
+            const innerRadius = 180;
+            const outerRadius = 300;
+            const coreRadius = 60;
+
+            // Inner ring: primary tools (larger dots, bigger labels)
+            primaryTools.forEach((tool, index) => {
+                const angle = (index / primaryTools.length) * Math.PI * 2 - Math.PI / 2;
+                const x = Math.cos(angle) * innerRadius;
+                const y = Math.sin(angle) * innerRadius;
+
+                const node = document.createElement('div');
+                node.className = 'tool-node primary';
+                node.setAttribute('data-name', tool);
+                node.style.left = `calc(50% + ${x}px)`;
+                node.style.top = `calc(50% + ${y}px)`;
+                // dot is 14px + 1.5px border*2 = 17px; center at 8.5px from top
+                node.style.transform = 'translate(-50%, -8.5px)';
+
+                const dot = document.createElement('div');
+                dot.className = 'tool-dot';
+
+                const count = document.createElement('div');
+                count.className = 'tool-count';
+                count.textContent = '0';
+                dot.appendChild(count);
+
+                node.appendChild(dot);
+
+                const label = document.createElement('div');
+                label.className = 'tool-label';
+                label.textContent = tool;
+                node.appendChild(label);
+
+                container.appendChild(node);
+
+                // Connection line: from core edge to tool dot center
+                // Use the angle to compute the perpendicular offset so the line
+                // center (not top edge) passes through the radial axis.
+                const lineLength = innerRadius - coreRadius;
+                const lineStartX = Math.cos(angle) * coreRadius;
+                const lineStartY = Math.sin(angle) * coreRadius;
+
+                const line = document.createElement('div');
+                line.className = 'connection-line';
+                line.setAttribute('data-tool', tool);
+                line.setAttribute('data-angle', angle);
+                line.style.width = lineLength + 'px';
+                line.style.left = `calc(50% + ${lineStartX}px)`;
+                line.style.top = `calc(50% + ${lineStartY}px)`;
+                updateLineTransform(line, 1);
+                container.appendChild(line);
+            });
+
+            // Outer ring: secondary tools (smaller dots, dimmer labels)
+            secondaryTools.forEach((tool, index) => {
+                const angle = (index / secondaryTools.length) * Math.PI * 2 - Math.PI / 2;
+                const x = Math.cos(angle) * outerRadius;
+                const y = Math.sin(angle) * outerRadius;
+
+                const node = document.createElement('div');
+                node.className = 'tool-node secondary';
+                node.setAttribute('data-name', tool);
+                node.style.left = `calc(50% + ${x}px)`;
+                node.style.top = `calc(50% + ${y}px)`;
+                // dot is 9px + 1.5px border*2 = 12px; center at 6px from top
+                node.style.transform = 'translate(-50%, -6px)';
+
+                const dot = document.createElement('div');
+                dot.className = 'tool-dot';
+                dot.style.width = '9px';
+                dot.style.height = '9px';
+
+                const count = document.createElement('div');
+                count.className = 'tool-count';
+                count.textContent = '0';
+                dot.appendChild(count);
+
+                node.appendChild(dot);
+
+                const label = document.createElement('div');
+                label.className = 'tool-label';
+                label.textContent = tool;
+                label.style.fontSize = '8px';
+                label.style.opacity = '0.4';
+                node.appendChild(label);
+
+                container.appendChild(node);
+
+                // Connection line: from core edge to outer tool dot center
+                const lineLength = outerRadius - coreRadius;
+                const lineStartX = Math.cos(angle) * coreRadius;
+                const lineStartY = Math.sin(angle) * coreRadius;
+
+                const line = document.createElement('div');
+                line.className = 'connection-line secondary-line';
+                line.setAttribute('data-tool', tool);
+                line.setAttribute('data-angle', angle);
+                line.style.width = lineLength + 'px';
+                line.style.left = `calc(50% + ${lineStartX}px)`;
+                line.style.top = `calc(50% + ${lineStartY}px)`;
+                updateLineTransform(line, 1);
+                line.style.opacity = '0.4';
+                container.appendChild(line);
+            });
+        }
+
+        // 更新连接线的 transform：translateY(-height/2) 让线的中心线穿过径向轴，
+        // 然后 rotate(angle) 让线沿径向方向延伸
+        function updateLineTransform(line, height) {
+            const angle = parseFloat(line.getAttribute('data-angle'));
+            line.style.height = height + 'px';
+            line.style.transform = `translateY(${-height / 2}px) rotate(${angle}rad)`;
+        }
+
+        // dot 尺寸变化时，更新 node 的 transform 让 dot 中心保持在坐标点上
+        // dotSize = dot 的 CSS width/height（不含 border）
+        // border 每边 1.5px，总 dot 渲染高度 = dotSize + 3
+        function updateNodeTransform(node, dotSize) {
+            const dotCenter = (dotSize + 3) / 2;
+            node.style.transform = `translate(-50%, -${dotCenter}px)`;
+        }
+
+        function initClock() {
+            setInterval(() => {
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('zh-CN', {
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+                document.getElementById('clockTime').textContent = timeStr;
+            }, 1000);
+        }
+
+        // ==================== 连接 ====================
+        let eventSource = null;
+
+        function connect() {
+            eventSource = new EventSource('http://127.0.0.1:18790/events');
+
+            eventSource.onopen = () => {
+                updateConnectionStatus(true);
+                touchWorkerActivity('sse.open');
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleEvent(data);
+                } catch (err) {
+                    console.error('Parse error:', err);
+                }
+            };
+
+            eventSource.onerror = () => {
+                updateConnectionStatus(false);
+                // Connection down doesn't necessarily mean agent is stalled, but mark worker as degraded.
+                setWorkerStatus('DEGRADED');
+                setTimeout(connect, 3000);
+            };
+        }
+
+        function updateConnectionStatus(connected) {
+            const status = document.getElementById('connectionStatus');
+            const dot = document.getElementById('connectionDot');
+
+            if (connected) {
+                status.textContent = 'CONNECTED';
+                dot.classList.remove('danger');
+            } else {
+                status.textContent = 'DISCONNECTED';
+                dot.classList.add('danger');
+            }
+        }
+
+        // ==================== 事件处理 ====================
+        function handleEvent(data) {
+            stats.events++;
+            updateStats();
+
+            // Any agent event indicates the worker is alive (agent/tool stream is flowing)
+            if (data.event === 'agent' && data.payload) {
+                touchWorkerActivity('agent.event');
+                handleAgentEvent(data.payload, data.sessionInfo);
+            }
+        }
+
+        function handleAgentEvent(payload, sessionInfo) {
+            const { stream, data } = payload;
+
+            // 更新 session 信息
+            if (sessionInfo) {
+                sessions.set(sessionInfo.id, sessionInfo);
+                stats.sessions = sessions.size;
+                updateStats();
+            }
+
+            if (stream === 'lifecycle') {
+                handleLifecycle(data);
+            } else if (stream === 'tool') {
+                handleTool(data);
+            } else if (stream === 'assistant') {
+                handleAssistant(data);
+            }
+        }
+
+        function handleLifecycle(data) {
+            const phase = data.phase;
+
+            if (phase === 'start') {
+                stats.runs++;
+                touchWorkerActivity('run.start');
+                currentState.status = 'running';
+                currentState.startTime = Date.now();
+                updateAgentStatus('RUNNING');
+                activateAgentCore(true);
+                currentAssistantItem = null; // 重置 assistant 追踪
+
+                addDetail('lifecycle', 'Run Started', {
+                    runId: (data.runId || 'N/A').substring(0, 8)
+                });
+            } else if (phase === 'end') {
+                currentState.status = 'idle';
+                currentState.startTime = null;
+                updateAgentStatus('IDLE');
+                activateAgentCore(false);
+                currentAssistantItem = null; // 重置
+                if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+
+                addDetail('lifecycle', 'Run Completed', {
+                    duration: document.getElementById('statDuration').textContent
+                });
+            }
+        }
+
+        // Track current pending tool for merging start+end
+        let pendingToolItems = {};
+
+        function handleTool(data) {
+            const { phase, name, params, result, error } = data;
+            const resolved = resolveToolName(name);
+
+            if (phase === 'start') {
+                stats.tools++;
+                touchWorkerActivity('tool.start');
+                // 如果收到 tool start 但核心没在转，说明漏掉了 lifecycle start
+                if (currentState.status !== 'running') {
+                    currentState.status = 'running';
+                    currentState.startTime = Date.now();
+                    updateAgentStatus('RUNNING');
+                    activateAgentCore(true);
+                }
+                // 有活动，清除 idle 计时器
+                if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+                activateToolNode(resolved, true);
+
+                // Format params with key details for each tool type
+                let paramsStr = 'N/A';
+                let shortDesc = '';
+                if (params) {
+                    try {
+                        if (typeof params === 'object') {
+                            // Extract key info for common tools
+                            if (resolved === 'exec' && params.command) {
+                                shortDesc = params.command.length > 80 ? params.command.substring(0, 80) + '…' : params.command;
+                            } else if (resolved === 'read' && (params.path || params.file_path)) {
+                                shortDesc = params.path || params.file_path;
+                            } else if (resolved === 'write' && (params.path || params.file_path)) {
+                                shortDesc = params.path || params.file_path;
+                            } else if (resolved === 'edit' && (params.path || params.file_path)) {
+                                shortDesc = params.path || params.file_path;
+                            } else if (resolved === 'browser') {
+                                shortDesc = params.action || '';
+                                if (params.url) shortDesc += ' → ' + params.url.substring(0, 60);
+                                if (params.kind) shortDesc += ' → ' + params.kind;
+                            } else if (resolved === 'web_search' && params.query) {
+                                shortDesc = `"${params.query}"`;
+                            } else if (resolved === 'web_fetch' && params.url) {
+                                shortDesc = params.url.substring(0, 80);
+                            }
+                            paramsStr = JSON.stringify(params, null, 2);
+                            if (paramsStr.length > 600) {
+                                paramsStr = paramsStr.substring(0, 600) + '…';
+                            }
+                        } else {
+                            paramsStr = String(params);
+                        }
+                    } catch (e) {
+                        paramsStr = String(params);
+                    }
+                }
+
+                const titleText = shortDesc ? `${resolved}: ${shortDesc}` : resolved;
+                const item = addDetail('tool', titleText, {
+                    params: paramsStr
+                }, resolved);
+                pendingToolItems[resolved] = item;
+            } else if (phase === 'end') {
+                // 实时模式下累加结果统计
+                if (currentSessionMode === 'live') {
+                    if (error) {
+                        resultCounts.error = (resultCounts.error || 0) + 1;
+                    } else if (!result || result === '') {
+                        resultCounts.no_output = (resultCounts.no_output || 0) + 1;
+                    } else {
+                        resultCounts.success = (resultCounts.success || 0) + 1;
+                    }
+                    updateResultBar();
+                }
+
+                setTimeout(() => activateToolNode(resolved, false), 1000);
+
+                // 设置 idle 超时：30 秒无新 tool start 则自动回 idle
+                // （防止漏掉 lifecycle end 事件导致核心永远转）
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => {
+                    if (currentState.status === 'running') {
+                        currentState.status = 'idle';
+                        currentState.startTime = null;
+                        updateAgentStatus('IDLE');
+                        activateAgentCore(false);
+                    }
+                }, 30000);
+
+                // Merge result into the pending start item if possible
+                const pending = pendingToolItems[resolved];
+
+                if (error) {
+                    const errorStr = typeof error === 'string' ? error : JSON.stringify(error, null, 2);
+                    const truncErr = errorStr.length > 800 ? errorStr.substring(0, 800) + '…' : errorStr;
+                    if (pending) {
+                        pending.data.result = '❌ ' + truncErr;
+                        pending.type = 'error';
+                        updateDetailsDisplay();
+                    } else {
+                        addDetail('error', `Error: ${resolved}`, { error: truncErr }, resolved);
+                    }
+                } else if (result) {
+                    let resultStr = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                    if (resultStr.length > 1500) {
+                        resultStr = resultStr.substring(0, 1500) + '…';
+                    }
+                    if (pending) {
+                        pending.data.result = resultStr;
+                        updateDetailsDisplay();
+                    } else {
+                        addDetail('tool', `Result: ${resolved}`, { result: resultStr }, resolved);
+                    }
+                } else {
+                    if (pending) {
+                        pending.data.result = '(no output)';
+                        updateDetailsDisplay();
+                    }
+                }
+
+                delete pendingToolItems[resolved];
+            }
+        }
+
+        function handleAssistant(data) {
+            const { text } = data;
+
+            if (!text || !text.trim()) return;
+
+            // 如果已有 assistant 回复正在进行，更新它而不是新增
+            if (currentAssistantItem && currentAssistantItem.type === 'assistant') {
+                // 更新现有项
+                currentAssistantItem.data.content = text;
+                currentAssistantItem.time = getTimeString();
+                updateDetailsDisplay();
+            } else {
+                // 创建新项
+                const item = addDetail('assistant', 'Assistant', {
+                    content: text
+                });
+                currentAssistantItem = item;
+            }
+        }
+
+        // ==================== UI 更新 ====================
+        function updateStats() {
+            document.getElementById('statRuns').textContent = stats.runs;
+            document.getElementById('statTools').textContent = stats.tools;
+            document.getElementById('statEvents').textContent = stats.events;
+            document.getElementById('statSessions').textContent = stats.sessions;
+        }
+
+        function setWorkerStatus(status) {
+            const statusEl = document.getElementById('workerStatus');
+            const dot = document.getElementById('workerDot');
+
+            statusEl.textContent = status;
+
+            if (status === 'OK') {
+                dot.classList.remove('danger');
+                dot.style.background = 'var(--primary)';
+                dot.style.boxShadow = '0 0 8px var(--primary)';
+            } else if (status === 'DEGRADED') {
+                dot.classList.remove('danger');
+                dot.style.background = 'var(--warning)';
+                dot.style.boxShadow = '0 0 8px var(--warning)';
+            } else {
+                // STALLED
+                dot.classList.add('danger');
+                dot.style.background = 'var(--danger)';
+                dot.style.boxShadow = '0 0 8px var(--danger)';
+            }
+        }
+
+        function touchWorkerActivity(reason) {
+            lastWorkerActivityAt = Date.now();
+            if (stallTimer) {
+                clearTimeout(stallTimer);
+            }
+            // Any activity implies the agent/tool pipeline is alive.
+            setWorkerStatus('OK');
+            stallTimer = setTimeout(() => {
+                // No activity for a while: agent and tools not working (or gateway not delivering).
+                setWorkerStatus('STALLED');
+                // Leave a visible breadcrumb in details.
+                addDetail('error', 'Worker Stalled', {
+                    reason: 'No agent/tool events observed for ' + Math.round(WORKER_STALL_MS / 1000) + 's',
+                    hint: 'Check whether the OpenClaw gateway is stuck, the agent crashed, or SSE is disconnected.'
+                });
+            }, WORKER_STALL_MS);
+        }
+
+        function updateAgentStatus(status) {
+            const statusEl = document.getElementById('agentStatus');
+            const dot = document.getElementById('agentDot');
+
+            statusEl.textContent = status;
+
+            if (status === 'RUNNING') {
+                dot.style.background = 'var(--primary)';
+                dot.style.boxShadow = '0 0 8px var(--primary)';
+            } else {
+                dot.style.background = 'var(--text-dim)';
+                dot.style.boxShadow = 'none';
+            }
+        }
+
+        function activateAgentCore(active) {
+            const core = document.getElementById('agentCore');
+            if (active) {
+                core.classList.add('active');
+            } else {
+                core.classList.remove('active');
+            }
+        }
+
+        function resolveToolName(name) {
+            if (!name) return '';
+            const lower = name.toLowerCase();
+            const exact = tools.find(t => t.toLowerCase() === lower);
+            if (exact) return exact;
+            return name;
+        }
+
+        function activateToolNode(toolName, active) {
+            const resolved = resolveToolName(toolName);
+            const nodes = document.querySelectorAll('.tool-node');
+            const lines = document.querySelectorAll('.connection-line');
+            const isSecondary = secondaryTools.includes(resolved);
+
+            nodes.forEach(node => {
+                if (node.getAttribute('data-name') === resolved) {
+                    if (active) {
+                        node.classList.add('active');
+                        toolCallCounts[resolved] = (toolCallCounts[resolved] || 0) + 1;
+                        const cnt = toolCallCounts[resolved];
+                        const countEl = node.querySelector('.tool-count');
+                        if (countEl) {
+                            countEl.textContent = cnt;
+                            countEl.classList.add('visible');
+                        }
+                        const dot = node.querySelector('.tool-dot');
+                        if (dot) {
+                            const baseSize = isSecondary ? 9 : 14;
+                            const growth = isSecondary ? 1 : 1.5;
+                            const maxSize = isSecondary ? 20 : 30;
+                            const size = Math.min(baseSize + cnt * growth, maxSize);
+                            dot.style.width = size + 'px';
+                            dot.style.height = size + 'px';
+                            updateNodeTransform(node, size);
+                        }
+                        // Brighten secondary label on activation
+                        if (isSecondary) {
+                            const label = node.querySelector('.tool-label');
+                            if (label) label.style.opacity = '1';
+                        }
+                    } else {
+                        node.classList.remove('active');
+                        if (isSecondary) {
+                            const label = node.querySelector('.tool-label');
+                            if (label) label.style.opacity = toolCallCounts[resolved] ? '0.7' : '0.4';
+                        }
+                    }
+                }
+            });
+
+            lines.forEach(line => {
+                if (line.getAttribute('data-tool') === resolved) {
+                    if (active) {
+                        line.classList.add('active');
+                        line.style.opacity = '1';
+                        const cnt = toolCallCounts[resolved] || 1;
+                        const thickness = Math.min(1 + cnt * 0.5, isSecondary ? 3 : 6);
+                        updateLineTransform(line, thickness);
+                        line.classList.add('used');
+                    } else {
+                        line.classList.remove('active');
+                        if (isSecondary) line.style.opacity = '0.6';
+                    }
+                }
+            });
+        }
+
+        // ==================== 详情面板 ====================
+        function getTimeString() {
+            const now = new Date();
+            return now.toLocaleTimeString('zh-CN', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 3
+            });
+        }
+
+        function addDetail(type, title, data, toolName) {
+            const item = {
+                time: getTimeString(),
+                type,
+                title,
+                data,
+                toolName: toolName || null,
+                collapsed: null  // will hold sub-items if folded
+            };
+
+            // Fold consecutive same-tool calls into a group
+            if (toolName && details.length > 0) {
+                const prev = details[0];
+                if (prev.toolName === toolName && prev.type === 'tool' && type === 'tool') {
+                    // If prev is already a group, append
+                    if (prev.collapsed) {
+                        prev.collapsed.push(item);
+                        prev.title = `${toolName} ×${prev.collapsed.length + 1}`;
+                        prev.time = item.time;
+                        // Keep latest params visible
+                        prev.data = { ...item.data, _group: `${prev.collapsed.length} more collapsed` };
+                        updateDetailsDisplay();
+                        return item;
+                    } else {
+                        // Convert prev into a group
+                        const groupItem = {
+                            time: item.time,
+                            type: 'tool',
+                            title: `${toolName} ×2`,
+                            data: { ...item.data, _group: '1 more collapsed' },
+                            toolName: toolName,
+                            collapsed: [prev]
+                        };
+                        details[0] = groupItem;
+                        updateDetailsDisplay();
+                        return groupItem;
+                    }
+                }
+            }
+
+            details.unshift(item);
+            if (details.length > maxDetails) details.pop();
+
+            updateDetailsDisplay();
+            return item;
+        }
+
+        function updateDetailsDisplay() {
+            const content = document.getElementById('detailsContent');
+            const count = document.getElementById('detailCount');
+
+            if (details.length === 0) {
+                content.innerHTML = '<div class="empty-state">Waiting for execution details...</div>';
+                count.textContent = '0';
+                return;
+            }
+
+            count.textContent = details.length;
+            content.innerHTML = details.map((detail, idx) => {
+                const typeClass = detail.type === 'error' ? 'error' :
+                                 detail.type === 'tool' ? 'tool-call' :
+                                 detail.type === 'lifecycle' ? 'lifecycle' :
+                                 'assistant-response';
+
+                const isGroup = detail.collapsed && detail.collapsed.length > 0;
+                const groupBadge = isGroup ? `<span style="font-size:8px;color:var(--secondary);margin-left:6px;cursor:pointer" onclick="toggleGroup(${idx})">▸ ${detail.collapsed.length} folded</span>` : '';
+
+                // Build meta rows, separating params and result
+                let paramsHtml = '';
+                let resultHtml = '';
+                if (detail.data) {
+                    Object.entries(detail.data).forEach(([key, value]) => {
+                        if (key === '_group') return; // skip internal
+                        const valStr = escapeHtml(String(value));
+                        if (key === 'result') {
+                            resultHtml = `<div class="detail-result">
+                                <div class="detail-result-label">output:</div>
+                                <div class="detail-result-content">${valStr}</div>
+                            </div>`;
+                        } else if (key === 'params') {
+                            paramsHtml = `<div class="detail-meta">
+                                <div class="detail-meta-row">
+                                    <span class="detail-meta-value" style="color:var(--text-dim);font-size:9px">${valStr}</span>
+                                </div>
+                            </div>`;
+                        } else {
+                            paramsHtml += `<div class="detail-meta-row">
+                                <span class="detail-meta-label">${key}:</span>
+                                <span class="detail-meta-value">${valStr}</span>
+                            </div>`;
+                        }
+                    });
+                }
+
+                // Collapsed group sub-items
+                let collapsedHtml = '';
+                if (isGroup) {
+                    collapsedHtml = `<div class="detail-group" id="group-${idx}" style="display:none;margin-top:6px;padding-left:8px;border-left:2px solid rgba(0,212,255,0.2)">
+                        ${detail.collapsed.map(sub => {
+                            let subContent = '';
+                            if (sub.data) {
+                                Object.entries(sub.data).forEach(([k, v]) => {
+                                    if (k === '_group') return;
+                                    subContent += `<div style="font-size:8px;color:var(--text-dim);margin:2px 0"><b>${k}:</b> ${escapeHtml(String(v)).substring(0, 200)}</div>`;
+                                });
+                            }
+                            return `<div style="margin-bottom:4px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.03)">
+                                <span style="font-size:8px;color:var(--text-dim)">${sub.time}</span>
+                                <span style="font-size:9px;color:var(--text);margin-left:4px">${escapeHtml(sub.title)}</span>
+                                ${subContent}
+                            </div>`;
+                        }).join('')}
+                    </div>`;
+                }
+
+                return `
+                    <div class="detail-item ${typeClass}">
+                        <div class="detail-header">
+                            <span class="detail-type ${detail.type}">${detail.type}</span>
+                            ${groupBadge}
+                            <span class="detail-time">${detail.time}</span>
+                        </div>
+                        <div class="detail-title">${escapeHtml(detail.title)}</div>
+                        ${paramsHtml}
+                        ${resultHtml}
+                        ${collapsedHtml}
+                    </div>
+                `;
+            }).join('');
+
+            content.scrollTop = 0;
+        }
+
+        function toggleGroup(idx) {
+            const el = document.getElementById('group-' + idx);
+            if (el) {
+                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+                // Toggle arrow
+                const btn = el.previousElementSibling;
+            }
+        }
+
+        function clearDetails() {
+            details = [];
+            currentAssistantItem = null;
+            updateDetailsDisplay();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ==================== 动画循环 ====================
+        function startAnimationLoop() {
+            setInterval(() => {
+                if (currentState.startTime) {
+                    const duration = Date.now() - currentState.startTime;
+                    document.getElementById('statDuration').textContent = formatDuration(duration);
+                    document.getElementById('uptimeBadge').textContent = formatDuration(duration);
+                }
+            }, 100);
+        }
+
+        function formatDuration(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+
+            if (minutes > 0) {
+                return `${minutes}:${secs.toString().padStart(2, '0')}`;
+            }
+            return `${secs}s`;
+        }
+
+        // ==================== 结果分布条 ====================
+        function updateResultBar() {
+            const total = resultCounts.success + resultCounts.no_output + resultCounts.error;
+            const container = document.getElementById('resultBarContainer');
+
+            if (total === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'block';
+
+            const pctSuccess = (resultCounts.success / total * 100).toFixed(1);
+            const pctNoOutput = (resultCounts.no_output / total * 100).toFixed(1);
+            const pctError = (resultCounts.error / total * 100).toFixed(1);
+
+            document.getElementById('barSuccess').style.width = pctSuccess + '%';
+            document.getElementById('barNoOutput').style.width = pctNoOutput + '%';
+            document.getElementById('barError').style.width = pctError + '%';
+
+            document.getElementById('legendSuccess').textContent = `✅ ${resultCounts.success}`;
+            document.getElementById('legendNoOutput').textContent = `📭 ${resultCounts.no_output}`;
+            document.getElementById('legendError').textContent = `❌ ${resultCounts.error}`;
+        }
+
+        // ==================== Session 管理 ====================
+        function loadSessionList() {
+            fetch('http://127.0.0.1:18790/api/sessions')
+                .then(r => r.json())
+                .then(sessions => {
+                    const select = document.getElementById('sessionSelect');
+                    select.innerHTML = '<option value="live">📡 Current Session (Live)</option>';
+                    sessions.forEach(s => {
+                        const opt = document.createElement('option');
+                        opt.value = s.id;
+                        const date = s.modified ? new Date(s.modified).toLocaleString('zh-CN', {
+                            month: '2-digit', day: '2-digit',
+                            hour: '2-digit', minute: '2-digit'
+                        }) : '';
+                        const sizeKB = Math.round(s.size / 1024);
+                        opt.textContent = `📋 ${s.id.substring(0, 8)}… | ${date} | ${sizeKB}KB`;
+                        select.appendChild(opt);
+                    });
+                })
+                .catch(err => console.warn('Failed to load sessions:', err));
+        }
+
+        function initSessionSelector() {
+            const select = document.getElementById('sessionSelect');
+            select.addEventListener('change', (e) => {
+                const value = e.target.value;
+                currentSessionMode = value;
+                const liveBadge = document.getElementById('liveBadge');
+
+                if (value === 'live') {
+                    liveBadge.style.display = 'inline-block';
+                    loadCurrentSessionBaseline();
+                } else {
+                    liveBadge.style.display = 'none';
+                    loadSessionHistory(value);
+                }
+            });
+        }
+
+        function resetVisualization() {
+            toolCallCounts = {};
+            document.querySelectorAll('.tool-node').forEach(node => {
+                node.classList.remove('active');
+                const isSecondary = node.classList.contains('secondary');
+                const baseSize = isSecondary ? 9 : 14;
+                const dot = node.querySelector('.tool-dot');
+                if (dot) {
+                    dot.style.width = baseSize + 'px';
+                    dot.style.height = baseSize + 'px';
+                }
+                updateNodeTransform(node, baseSize);
+                const count = node.querySelector('.tool-count');
+                if (count) {
+                    count.classList.remove('visible');
+                    count.textContent = '0';
+                }
+            });
+            document.querySelectorAll('.connection-line').forEach(line => {
+                line.classList.remove('active', 'used');
+                updateLineTransform(line, 1);
+            });
+            details = [];
+            currentAssistantItem = null;
+            updateDetailsDisplay();
+            stats = { runs: 0, tools: 0, events: 0, sessions: 0 };
+            updateStats();
+            resultCounts = { success: 0, no_output: 0, error: 0 };
+            updateResultBar();
+        }
+
+        function loadCurrentSessionBaseline() {
+            resetVisualization();
+            fetch('http://127.0.0.1:18790/api/sessions')
+                .then(r => r.json())
+                .then(sessionList => {
+                    if (!sessionList || sessionList.length === 0) return;
+                    return fetch(`http://127.0.0.1:18790/api/sessions/${sessionList[0].id}/events`)
+                        .then(r => r.json());
+                })
+                .then(data => {
+                    if (!data || data.error) return;
+                    const counts = data.toolCounts || {};
+                    for (const [name, count] of Object.entries(counts)) {
+                        applyToolHistory(name, count);
+                    }
+                    stats.tools = data.totalToolCalls || 0;
+                    stats.events = data.eventCount || 0;
+                    updateStats();
+                    resultCounts = data.resultStats || { success: 0, no_output: 0, error: 0 };
+                    updateResultBar();
+                    addDetail('system', 'Baseline loaded', {
+                        toolCalls: data.totalToolCalls || 0,
+                        tools: Object.keys(counts).length
+                    });
+                })
+                .catch(err => console.warn('Failed to load baseline:', err));
+        }
+
+        function loadSessionHistory(sessionId) {
+            resetVisualization();
+            addDetail('lifecycle', `Loading Session`, {
+                sessionId: sessionId.substring(0, 8) + '...'
+            });
+
+            fetch(`http://127.0.0.1:18790/api/sessions/${sessionId}/events`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) {
+                        addDetail('error', `Load Error`, {
+                            error: data.error
+                        });
+                        return;
+                    }
+
+                    const toolCounts = data.toolCounts || {};
+                    for (const [toolName, count] of Object.entries(toolCounts)) {
+                        applyToolHistory(toolName, count);
+                    }
+
+                    stats.tools = data.totalToolCalls || 0;
+                    stats.events = data.eventCount || 0;
+                    updateStats();
+
+                    resultCounts = data.resultStats || { success: 0, no_output: 0, error: 0 };
+                    updateResultBar();
+
+                    const rs = data.resultStats || {};
+                    addDetail('lifecycle', `Session Loaded`, {
+                        tools: data.totalToolCalls,
+                        success: rs.success || 0,
+                        noOutput: rs.no_output || 0,
+                        errors: rs.error || 0
+                    });
+                })
+                .catch(err => {
+                    addDetail('error', `Load Failed`, {
+                        error: err.message
+                    });
+                });
+        }
+
+        function applyToolHistory(toolName, count) {
+            const resolved = resolveToolName(toolName);
+            toolCallCounts[resolved] = (toolCallCounts[resolved] || 0) + count;
+            const totalCount = toolCallCounts[resolved];
+            const isSecondary = secondaryTools.includes(resolved);
+
+            document.querySelectorAll('.tool-node').forEach(node => {
+                if (node.getAttribute('data-name') === resolved) {
+                    const dot = node.querySelector('.tool-dot');
+                    if (dot) {
+                        const baseSize = isSecondary ? 9 : 14;
+                        const growth = isSecondary ? 1 : 1.5;
+                        const maxSize = isSecondary ? 20 : 30;
+                        const size = Math.min(baseSize + totalCount * growth, maxSize);
+                        dot.style.width = size + 'px';
+                        dot.style.height = size + 'px';
+                        updateNodeTransform(node, size);
+                    }
+                    const countEl = node.querySelector('.tool-count');
+                    if (countEl) {
+                        countEl.textContent = totalCount;
+                        countEl.classList.add('visible');
+                    }
+                    if (isSecondary) {
+                        const label = node.querySelector('.tool-label');
+                        if (label) label.style.opacity = '0.7';
+                    }
+                }
+            });
+
+            document.querySelectorAll('.connection-line').forEach(line => {
+                if (line.getAttribute('data-tool') === resolved) {
+                    const thickness = Math.min(1 + totalCount * 0.5, isSecondary ? 3 : 6);
+                    updateLineTransform(line, thickness);
+                    line.classList.add('used');
+                    if (isSecondary) line.style.opacity = '0.6';
+                }
+            });
+        }
+
+        // ==================== 启动 ====================
+        window.addEventListener('load', init);
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) eventSource.close();
+        });
+    </script>
+</body>
+</html>
