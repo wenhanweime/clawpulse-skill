@@ -2,6 +2,8 @@
 
 A tiny skill that opens the **ClawPulse** local monitoring dashboard in your default browser.
 
+![ClawPulse Dashboard](assets/clawpulse-dashboard.png)
+
 - Dashboard (default): `http://127.0.0.1:18790/`
 - Gateway (expected): `ws://127.0.0.1:18789`
 
