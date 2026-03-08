@@ -935,9 +935,14 @@
         };
 
         // Worker health (agent + tools activity)
-        const WORKER_STALL_MS = 45000; // 45s: no agent/tool event -> mark stalled
+        // We distinguish:
+        // - WORKING: agent/tool events are flowing
+        // - QUIET: connected but no recent work (this is NOT an error)
+        // - DEGRADED: SSE disconnected (unknown)
+        const WORKER_QUIET_MS = 45000; // 45s without agent/tool events => show QUIET (not an error)
         let lastWorkerActivityAt = Date.now();
-        let stallTimer = null;
+        let quietTimer = null;
+        let lastWorkerStatus = 'DEGRADED';
 
         let idleTimer = null; // 无活动超时，自动回 idle
 
@@ -946,7 +951,9 @@
             initToolNodes();
             initClock();
             setWorkerStatus('DEGRADED');
+            // Start in QUIET until we see real activity
             touchWorkerActivity('init');
+            setWorkerStatus('QUIET');
             connect();
             startAnimationLoop();
             loadSessionList();
@@ -1099,6 +1106,8 @@
 
             eventSource.onopen = () => {
                 updateConnectionStatus(true);
+                // Connection is back; if no events yet, show QUIET.
+                setWorkerStatus('QUIET');
                 touchWorkerActivity('sse.open');
             };
 
@@ -1113,7 +1122,7 @@
 
             eventSource.onerror = () => {
                 updateConnectionStatus(false);
-                // Connection down doesn't necessarily mean agent is stalled, but mark worker as degraded.
+                // SSE down => we don't know the worker state.
                 setWorkerStatus('DEGRADED');
                 setTimeout(connect, 3000);
             };
@@ -1160,6 +1169,8 @@
                 handleTool(data);
             } else if (stream === 'assistant') {
                 handleAssistant(data);
+            } else if (stream === 'thinking') {
+                handleThinking(data);
             }
         }
 
@@ -1336,6 +1347,45 @@
             }
         }
 
+        // Thinking stream: show *activity* only (no raw chain-of-thought text).
+        // NOTE: some models/providers may not emit thinking.
+        function handleThinking(data) {
+            if (!data) return;
+
+            const chars = (typeof data.chars === 'number') ? data.chars : null;
+            const signature = data.signature || null;
+            // runId is required to fetch the delayed full text
+
+            const outline = Array.isArray(data.outline) ? data.outline : [];
+
+            const item = addDetail('lifecycle', 'Thinking', {
+                chars: chars,
+                outline: outline.length ? outline : '(no outline extracted)',
+                signature: signature,
+                text: '(loading...)'
+            });
+
+            // Fetch full text after a delay (non-realtime)
+            const minAgeMs = 2000;
+            setTimeout(async () => {
+                try {
+                    const rid = data.runId || (data && data.runId) || null;
+                    if (!rid) return;
+                    const resp = await fetch(`/thinking?runId=${encodeURIComponent(rid)}&minAgeMs=${minAgeMs}`);
+                    if (resp.status === 202) return; // still pending
+                    if (!resp.ok) return;
+                    const json = await resp.json();
+                    if (json && json.ok && json.text) {
+                        item.data.text = json.text;
+                        item.time = getTimeString();
+                        updateDetailsDisplay();
+                    }
+                } catch(e) {
+                    // ignore
+                }
+            }, minAgeMs);
+        }
+
         // ==================== UI 更新 ====================
         function updateStats() {
             document.getElementById('statRuns').textContent = stats.runs;
@@ -1348,18 +1398,20 @@
             const statusEl = document.getElementById('workerStatus');
             const dot = document.getElementById('workerDot');
 
+            lastWorkerStatus = status;
             statusEl.textContent = status;
 
-            if (status === 'OK') {
+            if (status === 'WORKING') {
                 dot.classList.remove('danger');
                 dot.style.background = 'var(--primary)';
                 dot.style.boxShadow = '0 0 8px var(--primary)';
-            } else if (status === 'DEGRADED') {
+            } else if (status === 'QUIET') {
+                // Quiet / no recent work: neutral warning color, but NOT an error.
                 dot.classList.remove('danger');
                 dot.style.background = 'var(--warning)';
                 dot.style.boxShadow = '0 0 8px var(--warning)';
             } else {
-                // STALLED
+                // DEGRADED (SSE disconnected / unknown)
                 dot.classList.add('danger');
                 dot.style.background = 'var(--danger)';
                 dot.style.boxShadow = '0 0 8px var(--danger)';
@@ -1368,20 +1420,20 @@
 
         function touchWorkerActivity(reason) {
             lastWorkerActivityAt = Date.now();
-            if (stallTimer) {
-                clearTimeout(stallTimer);
-            }
-            // Any activity implies the agent/tool pipeline is alive.
-            setWorkerStatus('OK');
-            stallTimer = setTimeout(() => {
-                // No activity for a while: agent and tools not working (or gateway not delivering).
-                setWorkerStatus('STALLED');
-                // Leave a visible breadcrumb in details.
-                addDetail('error', 'Worker Stalled', {
-                    reason: 'No agent/tool events observed for ' + Math.round(WORKER_STALL_MS / 1000) + 's',
-                    hint: 'Check whether the OpenClaw gateway is stuck, the agent crashed, or SSE is disconnected.'
-                });
-            }, WORKER_STALL_MS);
+
+            if (quietTimer) clearTimeout(quietTimer);
+
+            // Any agent/tool activity => worker is working.
+            setWorkerStatus('WORKING');
+
+            // If we go quiet for a while, we show QUIET (not error) and do NOT add an error detail.
+            quietTimer = setTimeout(() => {
+                // Only downgrade to QUIET if we are still connected.
+                const conn = document.getElementById('connectionStatus')?.textContent;
+                if (conn === 'CONNECTED') {
+                    setWorkerStatus('QUIET');
+                }
+            }, WORKER_QUIET_MS);
         }
 
         function updateAgentStatus(status) {
@@ -1549,6 +1601,7 @@
                 const typeClass = detail.type === 'error' ? 'error' :
                                  detail.type === 'tool' ? 'tool-call' :
                                  detail.type === 'lifecycle' ? 'lifecycle' :
+                                 detail.type === 'thinking' ? 'assistant-response' :
                                  'assistant-response';
 
                 const isGroup = detail.collapsed && detail.collapsed.length > 0;

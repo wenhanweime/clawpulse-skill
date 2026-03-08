@@ -54,7 +54,7 @@ try {
     console.log('✅ 配置和身份加载成功');
 } catch (err) {
     console.error('❌ 无法加载配置:', err.message);
-    console.error('Please ensure OpenClaw is configured correctly.');
+    console.error('请确保 OpenClaw 已正确配置');
     process.exit(1);
 }
 
@@ -277,6 +277,10 @@ const stats = {
     startTime: Date.now()
 };
 
+// Delayed thinking store (runId -> {ts, text, signature})
+// Note: kept in-memory only, trimmed to avoid growth.
+const thinkingStore = new Map();
+
 // ==================== Gateway 连接管理 ====================
 
 function connectToGateway() {
@@ -358,7 +362,7 @@ function handleGatewayMessage(frame) {
         // 启动定期轮询
         startPeriodicPolling();
 
-        // Start JSONL file tailing (for tool events)
+        // 启动 JSONL 文件监控（获取 tool 事件）
         startJsonlWatcher();
         return;
     }
@@ -710,7 +714,7 @@ function startPeriodicPolling() {
     console.log('⏰ 启动定期 RPC 轮询 (30秒)');
 }
 
-// ==================== JSONL Tool event tailing ====================
+// ==================== JSONL Tool 事件监控 ====================
 // Gateway WebSocket 不推送 tool stream 事件，所以我们直接 tail session JSONL 文件
 
 let jsonlWatcher = null;
@@ -741,13 +745,11 @@ function startJsonlWatcher() {
         }
 
         watchedSessionFile = filePath;
-        try {
-            jsonlFileSize = fs.statSync(filePath).size;
-        } catch(e) {
-            jsonlFileSize = 0;
-        }
+        // Start from 0 so we can parse existing content (needed for delayed thinking fetch).
+        // Tool events will replay, but UI already dedupes reasonably.
+        jsonlFileSize = 0;
 
-        console.log(`📄 Tailing JSONL: ${path.basename(filePath)}`);
+        console.log(`📄 监控 JSONL: ${path.basename(filePath)}`);
 
         jsonlWatcher = fs.watch(filePath, (eventType) => {
             if (eventType !== 'change') return;
@@ -772,9 +774,10 @@ function startJsonlWatcher() {
                         const msg = entry.message;
                         if (!msg) continue;
 
-                        // toolCall → tool start
+                        // assistant blocks: tool calls + thinking
                         if (msg.role === 'assistant' && Array.isArray(msg.content)) {
                             for (const block of msg.content) {
+                                // toolCall → tool start
                                 if (block.type === 'toolCall') {
                                     const toolEvent = {
                                         type: 'event',
@@ -794,6 +797,62 @@ function startJsonlWatcher() {
                                     broadcastToBrowsers(toolEvent);
                                     const argsStr = block.arguments ? JSON.stringify(block.arguments).substring(0, 100) : '';
                                     console.log(`🔧 tool.start: ${block.name}`, argsStr ? `params: ${argsStr}` : '');
+                                }
+
+                                // thinking → emit a *safe outline* (no raw chain-of-thought text)
+                                // We intentionally avoid forwarding full reasoning. Instead we derive a short outline from headings/bullets.
+                                if (block.type === 'thinking') {
+                                    const t = (block.thinking || '').trim();
+                                    if (t) {
+                                        const lines = t.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                                        const outline = [];
+                                        for (const line of lines) {
+                                            // Keep only very high-level structure: headings / bullets / numbered items.
+                                            if (/^(#+\s+|\*\*.+\*\*$|[-*]\s+|\d+\.)/.test(line)) {
+                                                let cleaned = line
+                                                    .replace(/^#+\s+/, '')
+                                                    .replace(/^[-*]\s+/, '')
+                                                    .replace(/^\d+\.\s+/, '')
+                                                    .replace(/^\*\*/, '').replace(/\*\*$/, '')
+                                                    .trim();
+                                                if (cleaned) outline.push(cleaned);
+                                            }
+                                            if (outline.length >= 6) break;
+                                        }
+
+                                        const thinkingEvent = {
+                                            type: 'event',
+                                            event: 'agent',
+                                            payload: {
+                                                stream: 'thinking',
+                                                data: {
+                                                    present: true,
+                                                    chars: t.length,
+                                                    outline,
+                                                    // Full thinking text is intentionally NOT sent over SSE.
+                                                    // It may be fetched by the UI via /thinking after a delay.
+                                                    ts: Date.now(),
+                                                    signature: block.thinkingSignature || null,
+                                                    runId: entry.id
+                                                },
+                                                runId: entry.id,
+                                                sessionKey: 'agent:main:main'
+                                            }
+                                        };
+                                        broadcastToBrowsers(thinkingEvent);
+
+                                        // Store full thinking server-side for delayed fetch.
+                                        thinkingStore.set(entry.id, {
+                                            ts: Date.now(),
+                                            text: t,
+                                            signature: block.thinkingSignature || null
+                                        });
+                                        // Trim store
+                                        if (thinkingStore.size > 50) {
+                                            const firstKey = thinkingStore.keys().next().value;
+                                            thinkingStore.delete(firstKey);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -837,7 +896,7 @@ function startJsonlWatcher() {
         });
     }
 
-    // Initial tailing
+    // 初始监控
     const activeFile = findActiveSession();
     if (activeFile) watchFile(activeFile);
 
@@ -943,6 +1002,32 @@ const server = http.createServer((req, res) => {
             })),
             approvals: Array.from(approvalRequests.values())
         }, null, 2));
+
+    } else if (req.url.startsWith('/thinking')) {
+        // Delayed thinking fetch (never streamed via SSE)
+        // Usage:
+        //   /thinking?runId=<id>&minAgeMs=2000
+        // Returns { ok, runId, ageMs, text }
+        const u = new URL(req.url, `http://${req.headers.host}`);
+        const runId = u.searchParams.get('runId') || '';
+        const minAgeMs = Number(u.searchParams.get('minAgeMs') || '2000');
+
+        if (!runId || !thinkingStore.has(runId)) {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: 'not_found' }));
+            return;
+        }
+
+        const item = thinkingStore.get(runId);
+        const ageMs = Date.now() - item.ts;
+        if (ageMs < minAgeMs) {
+            res.writeHead(202, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, pending: true, runId, ageMs, minAgeMs }));
+            return;
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, runId, ageMs, signature: item.signature || null, text: item.text }));
 
     } else if (req.url === '/api/sessions') {
         // 列出所有 session JSONL 文件
@@ -1081,7 +1166,7 @@ const server = http.createServer((req, res) => {
         }
 
     } else if (req.url === '/' || req.url === '/monitor') {
-        // Default dashboard page
+        // 默认打开监控页面
         const htmlPath = path.join(__dirname, 'clawpulse.html');
         try {
             const html = fs.readFileSync(htmlPath, 'utf8');
@@ -1144,7 +1229,7 @@ server.listen(PROXY_PORT, '127.0.0.1', () => {
     console.log(`📊 Status: http://127.0.0.1:${PROXY_PORT}/status`);
     console.log('='.repeat(60));
 
-    // Connect to Gateway
+    // 连接到 Gateway
     connectToGateway();
 });
 
